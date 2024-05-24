@@ -1,6 +1,5 @@
 ---
 title: "Data Science With R Project Report"
-author: "Sara Amhan-2105687, Zehra Nur Ceylan-1805440"
 date: "17-01-2024"
 output:
   html_document:

@@ -1,0 +1,299 @@
+---
+title: "Data Science With R Project Report"
+author: "Sara Amhan-2105687, Zehra Nur Ceylan-1805440"
+date: "17-01-2024"
+output:
+  html_document:
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+    keep_tex: true
+fontsize: 10pt
+---
+
+# The Data {#sec-the-data}
+
+-   Before introducing our project's research question we would like to introduce you to our data file first. Our data can be downloaded in the following link: [\textcolor{blue}{Paid Employee Statistic}](https://data.tuik.gov.tr/bulten/DownloadIstatistikselTablo?p=qrMkUqQoJ66XSf/oShBcZFaKq6Yq9/pr8QwceI4zJRIarPYoXLbORduGZd8TSByh)
+
+-   The used excel file in this project contains more than one table some are primary tables and some are children of those primary table. Please check the following graph to know more about the tables structure in our plain excel file.
+
+    ![Tables Structure Graph](images/Tables%20Structure%20Graph.png){width="3.13in"}
+
+-   In this project we will be making our own table that we found most optimal for the methods we decided to use to answer our research question.
+
+-   All the tables in the data have the same columns and they are:
+
+    -   **Unadjusted Number of paid employees**: count of employees without any adjustments for seasonal or calendar variations.
+    -   **Calendar adjusted Number of paid employees**: count of employees adjusted to account for calendar-related variations, such as the number of working days in a month or year.
+    -   **Calendar adjusted Annual change (%)**: the percentage change in the number of paid employees on a year-over-year basis after adjusting for calendar-related variations.
+    -   **Seasonally adjusted Number of paid employees**: count of employees adjusted to account for seasonal variations, such as changes in hiring patterns that occur regularly throughout the year.
+    -   **Seasonally adjusted Monthly change (%)**: the percentage change in the number of paid employees on a month-over-month basis after adjusting for seasonal variations.
+
+    ![Here's a look into the excel file](images/clipboard-723530079.png){width="501"}
+
+------------------------------------------------------------------------
+
+# Research Question & Project Flow
+
+In this project we try to use mention above data to answer the questions:
+
+***"Across the years, which sectors’ employment rate have fallen/ risen?"***
+
+***"Do we expect a specific sector employment rate to keep declining/ rising?"***
+
+We will firstly construct the optimal table then we will try to answer the question using representative graphs and statistical tests to check the confidence levels of our findings.
+
+------------------------------------------------------------------------
+
+# Table Construction
+
+Let's start with reading in the tables.
+
+We will first read in the "Year" & "Month" columns to attach them to the created tables that lost it because they aren't the first table. We will also use the `zoo` function `na.locf` to fill in the missing spaces in "Year" with the last year entry.
+
+```{r message=FALSE, warning=FALSE}
+  library(readxl)
+  library(zoo)
+  
+  yearMonth = read_xls('paid employee statistics.xls', range= "A7:B182", col_names = FALSE) |>
+                na.locf(na.rm = FALSE)
+  colnames(yearMonth) = c("year", "month")
+```
+
+Now lets read in the following tables: *Industry*, *Construction*, *Trade & Services, and the sum of all table...*
+
+```{r message=FALSE, warning=FALSE, size = "tiny"}
+  summTable = read_xls('paid employee statistics.xls', range= "C7:G182", col_names = FALSE)
+  industry = read_xls('paid employee statistics.xls', range= "I7:M182", col_names = FALSE)
+  construction = read_xls('paid employee statistics.xls', range= "AM7:AQ182", col_names = FALSE)
+  trade_ser = read_xls('paid employee statistics.xls', range= "AS7:AW182", col_names = FALSE)
+```
+
+Now we will:
+
+-   Make a function to rename the columns, attach the "year" and "month" columns, drop the last two columns (*Seasonally adjusted Number of paid employees, Monthly change (%)*) as we are our question has a much larger scope so seasonally adjusted columns won't be of much use.
+
+-   Map that function onto the list of our tables
+
+```{r warning=FALSE, size = "tiny"}
+  library(purrr)
+  
+  # table tidying function
+  process_table = function(table) {
+  colnames(table) = c("unadj_num_of_emp", "cal_adj_num_of_emp", "Annual_change_perc",
+                      "sea_adj_num_of_emp", "Monthly change perc") 
+  table = table[, -c(length(colnames(table))-1, length(colnames(table)))]
+  table = cbind(yearMonth, table)
+  }
+  
+  proc_tables = list(summTable, industry, construction, trade_ser) |> 
+                  map(process_table)
+```
+
+The created `proc_tables` variable now is a list of each table in the list processed we will now reassign each table to its corresponding processed table...
+
+```{r}
+  summTable = proc_tables[[1]]
+  industry = proc_tables[[2]]
+  construction = proc_tables[[3]]
+  trade_ser = proc_tables[[4]]
+```
+
+Now to make our optimal table we will add a column to each table that specifies its sector (*industry, construction* or *trade and services*) and then join them all to one table and that will be the table we will use for most of our data exploration and question answering...
+
+```{r message=FALSE, warning=FALSE}
+  library(dplyr)
+
+  industry['sectors'] = 'industry'
+  construction['sectors'] = 'construction'
+  trade_ser['sectors'] = 'trade & services'
+  
+  sectors_data = rbind(industry, construction, trade_ser)
+  sectors_data |>
+    mutate(sectors = factor(sectors)) -> sectors_data
+```
+
+Let's have a look at the head of our table...
+
+```{r}
+  print(head(sectors_data))
+```
+
+------------------------------------------------------------------------
+
+# Data Cleaning & Wrangling
+
+## NA Values
+
+the na values in our table come from the first 12 values in each sector in the *Annual change perc*. This is very expected because we don't have the previous year's data. Now there are multiple ways to deal with those na values: - we can fill those values with the mean of the column which isn't a wise choice because we know regarding if the amount of the increase is significant or not, the employment rate kept increasing through out the years so the filled values would lead us to make false assumptions if filled with the mean. - we can fill it with the median but it is even a worse choice than the mean for its high bias. - we can, if the number of values isn't significant, completely omit those na values. The third option seems the most reasonable so we will check the ratio of na values just to be sure
+
+```{r}
+  na_ratio = colMeans(is.na(sectors_data))
+  print(na_ratio)
+```
+
+As seen the ratio is only 6% of the data meaning the number isn't that significant so we will proceed with omitting the missing values...
+
+```{r}
+  sectors_data = na.omit(sectors_data)
+  summTable = na.omit(summTable)
+```
+
+## Data Wrangling
+
+Now that we are done cleaning let's have a look into our data and see what we have to work with...
+
+```{r}
+  str(sectors_data)
+```
+
+\break
+
+we see that month is actually read as a character lets change that quickly
+
+```{r message=FALSE, warning=FALSE}
+  library(dplyr)
+  sectors_data |>
+    mutate(month = as.numeric(month)) -> sectors_data
+  str(sectors_data)
+```
+
+Because we performed omit on our table the indices of those values got removed and our table now has indices missing so we don't face any trouble later lets reset our index column...
+
+```{r}
+  row.names(sectors_data) <- NULL
+```
+
+Before applying any statistical tests let's make a table that calculates the rate of change for a specific sector in a specific year. This table helps us make a bar plot and compare the sectors rate of change in one year rather than, like in the data set, compare the month to the month in the previous year. This table is useful because of the small but summative data set which allows us to make plots that are more useful when there's a small data set like bar plots, pie charts..etc. \footnotesize
+
+```{r message=FALSE, warning=FALSE, paged.print=TRUE}
+  sectors_data |>
+    arrange(year, month) |>
+    group_by(year, sectors) |>
+    summarise(rate_of_change = mean(diff(unadj_num_of_emp) / lag(unadj_num_of_emp), na.rm = TRUE) * 100) -> diff_tab
+  print(head(diff_tab))
+```
+
+\normalsize
+
+------------------------------------------------------------------------
+
+# Visualizations
+
+In this section we will be showing you a few graphs that we will later use to answer our questions and validate our assumptions and speculation. We prepared three graphs each representing a different point of view from our data so please pay attention to the axes names and data used as there are two different tables that have been used.
+
+\break
+
+## Bar plot of employments:
+
+Now that we have our table lets make a bar plot to compare the years...
+
+```{r fig.height=4, fig.width=12, warning=FALSE}
+  library(ggplot2)
+  library(repr)
+
+  ggplot(diff_tab, aes(x = year, y = rate_of_change, fill = sectors)) +
+    geom_bar(stat = "identity", position = "dodge") + 
+    theme(axis.text.x = element_text(angle = 45, vjust = 0.5)) +
+    scale_x_continuous(labels=as.character(diff_tab$year), breaks=diff_tab$year) +
+    labs(x = "Years", y = "Rate Of Change By The Year") +
+    ggtitle("Rate Of Change In The Number Of Employees Across The Years")
+```
+
+We now notice the following trend in employment across the years:
+
+-   The 2018 sudden plunge in employment can be tracked back to the **Turkish currency and debt crisis.** We can assume that economic crisis led to workplaces firing employees to avoid losing more profit.
+-   The industry sector is the most unstable as it steadily plummets then goes back up this will be more clear with the to be displayed line plots. - The trade and services sector was always the highest in hiring numbers.
+-   We can assume that the low hiring rate in 2016 is because of the unfortunate coup events that happened that year.
+-   We can also assume that turkey is a very quick recoverer from economic crises.
+-   The 2020 low hiring numbers in the trade & services sector can also be tracked back to the Corona health crisis the world has went through.
+
+## Linear Models
+
+Lets now try making a linear model for each of the sectors...
+
+```{r  fig.height=4, fig.width=12}
+  sectors_data$month_date <- as.Date(paste(sectors_data$year, sectors_data$month, "01", sep = "-"))
+  
+  ggplot(sectors_data, aes(x = month_date, y = unadj_num_of_emp)) +
+    geom_point(size = 1) +
+    geom_smooth(method = 'lm', formula = y ~ x, se = FALSE, color = 'red') +
+    facet_wrap(~ sectors) +
+    labs(x = "Years", y = "Unadjusted # Of Employments \n IN MILLIONS", 
+         title = "Linear Model For Each Sector Across The Years Since 2010") +
+    scale_x_date(date_breaks = "1 year", date_labels = "%Y", expand = c(0.02, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    scale_y_continuous(labels = scales::comma_format(scale = 1e-6))
+  
+```
+
+From the linear models we can see that the order of the rate of growth (slope) is :
+
+***Trade & Services \> Industry \> Construction.***
+
+-   we also notice a continuous pattern in the trade & services sector indicating constant firing and employment which might mean unstableness in the sector but also can mean a more active sector.
+
+## Line plots for the annual change rate
+
+```{r fig.height=4, fig.width=12, message=FALSE, warning=FALSE}
+  ggplot(sectors_data, aes(x = month_date, y = Annual_change_perc)) +
+    geom_line(color = 'red', size=1) +
+    facet_wrap(~ sectors) +
+    labs(x = "Years", y = "Annual change percentages", 
+           title = "Annual Year Percentages Of Each Sector Across The Years Since 2010") +
+    scale_x_date(date_breaks = "1 year", date_labels = "%Y", expand = c(0.02, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+This is a very interesting output. From the linear model we can see that construction has the least change rate (slope) of the employees numbers is very low but now that we see the raw annual change percentage we notice a very sudden decrease and then rocketing in the variable. However after the spikes it quickly recovers to a more stable pattern and we can notice that the pattern isn't a decreasing one like the other two sectors. In the other two sectors we can see that the change percentage is slowly decreasing in the recent three years which is very concerning. This might mean if more opportunities are not offered we might run into an unemployment crisis in the coming 3-4 years in those sectors.
+
+------------------------------------------------------------------------
+
+# BONUS: Statistical Test
+
+## Mann Kendall Trend Test
+
+This statistical non-parametric test that tests if data, collected over time, has consistently increasing or decreasing trends in the y values. Here's the hypothesis of this test for anyone interested:
+
+-   ***H~0~***: the data has no monotonic trend in its time the series.
+-   ***H~a~***: a trend exists. This trend can be positive, negative, or non-null.
+
+Because this test can only be applied to one time series we will use the tables we made for each sector but first we will omit the na values then pass the unadjusted employees number...
+
+1.  **Industry**
+
+```{r warning=FALSE}
+  library(Kendall)
+  industry =  na.omit(industry)
+  MannKendall(industry$unadj_num_of_emp)
+```
+
+Looking at the test statistic (tau) we notice the very close value to 1 this is a very high value because the upper bound of the test statistic is 1. A high test value means a very strong trend in the unudjusted number of employees column and because the p-values is very small we are statistically very confident in our deduction.
+
+2.  **Construction**
+
+```{r warning=TRUE}
+  construction =  na.omit(construction)
+  MannKendall(construction$unadj_num_of_emp)
+```
+
+We also reject the null hypothesis here but we notice that the test value isn't very high which means the trend is a weak one.
+
+3.  **Trade & Services**
+
+```{r warning=TRUE}
+  trade_ser =  na.omit(trade_ser)
+  MannKendall(trade_ser$unadj_num_of_emp)
+```
+
+In this test as well, we reject the null hypothesis and looking at the test statistic the trend is strong but not as strong as the industry sector.
+
+-   overall we can say that in all sectors the number of employees have a trend however this doesn't neglect the fact that the employment rate is declining by the years. This might mean that the number of employees by the coming years is going to keep rising but not at the same rate it used to.
+
+------------------------------------------------------------------------
+
+# CONCLUSION
+
+Now our tests and graphs help us answer the first part of our question. The number of employments in all sectors have significantly changed with the type of change being uncertain according to the statistical test we performed. However, looking at the graphs we can say the type of change is increase with different rates of increase for different sectors.
+
+The second part of the research is more of a speculation part. We need to answer the question for each sector so we will be left with three answers. For the construction sector, we can see very dramatic and sudden increase and decrease, so it's hard to speculate on later years, however using the information we obtained in the statistical test we can say that the trend in the construction sector might not last for long if more new jobs aren't introduced to the industry, the trend might not last long. For both the industry and trade & service, we notice a more stable pattern however from the latest months we can notice a drop, so our speculation is, if more employment opportunities aren't offered, we expect it to keep declining. However, this issue has risen in all parts of the world and we should be able to face it with the help of the government encouraging and placing rules in favor of the country's economy.
